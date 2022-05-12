@@ -1,0 +1,313 @@
+---
+title: "Classifcation of Confusion from EEG Signals"
+author: "Katie Monroe"
+date: "2/24/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(stats)
+library(ggbiplot)
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(ochRe)
+```
+
+
+
+```{r}
+
+#load in the data
+data <- read.csv("EEG_data.csv",
+         sep = ",", header = TRUE)
+
+data <- subset(data, data$SubjectID != 6)
+
+#add an index/sample column
+data$Sample <- ave( 1:nrow(data), data$SubjectID, factor(data$VideoID), FUN=function(x) 1:length(x))
+
+#plot all subjects
+ggplot(data, aes(x=Sample, y=Raw, colour=as.factor(SubjectID)))+ geom_line()
+
+#plot all videos
+ggplot(data, aes(x=Sample, y=Raw, colour=as.factor(VideoID))) + geom_line()
+
+#plot grand averages
+video_GA <- aggregate(data$Raw, list(VideoID = data$VideoID, Sample = data$Sample, user.definedlabeln = data$user.definedlabeln), FUN=mean) 
+
+video_GA$VideoID <- as.factor(video_GA$VideoID)
+video_GA$user.definedlabeln <- as.factor(video_GA$user.definedlabeln)
+
+names(video_GA)[names(video_GA) == 'x'] <- 'AvgRaw'
+video_GA$AvgRaw <- as.numeric(video_GA$AvgRaw)
+
+ggplot(video_GA, aes(x=Sample, y=AvgRaw, colour=VideoID)) + geom_line() + facet_grid(~ user.definedlabeln)+theme_bw()+
+  scale_color_manual(values=c("deepskyblue3", "darkgreen",
+                              "magenta4",
+                              "midnightblue", "thistle3",
+                              "red4","rosybrown3",
+                              "cornflowerblue", "brown4",
+                              "mediumvioletred"))
+
+
+#plot wave averages
+subject_delta <- data %>% dplyr::group_by(Sample, user.definedlabeln) %>% dplyr::summarise(AvgD = mean(Delta), AvgT = mean(Theta),
+                                                                             AvgA1 = mean(Alpha1), AvgA2 = mean(Alpha2),
+                                                                             AvgB1 = mean(Beta1), AvgB2 = mean(Beta2), 
+                                                                             AvgG1 = mean(Gamma1), AvgG2 = mean(Gamma2))
+
+subject_delta <- melt(subject_delta, id.var=c("Sample", "user.definedlabeln"))
+ggplot() + geom_line(data = subject_delta, aes(x=Sample, y=value, col = variable))+ facet_grid(~ user.definedlabeln)+theme_bw()+
+  scale_color_manual(values=c("blue4", "cyan4",
+                              "cornflowerblue",
+                              "powderblue", "darkorchid4",
+                              "plum3","maroon3",
+                              "darkorange2", "orange",
+                              "burlywood3"))
+
+ggplot() + geom_density(data = subject_delta, aes(x = value, fill = variable))+ facet_grid(~ user.definedlabeln)+theme_bw()
+
+
+
+waves <- data[,c(6:13,15)]
+waves <- melt(waves, id.vars = "user.definedlabeln")
+ggplot(waves, aes(value)) + 
+  geom_histogram(scale = 1, color = "darkblue", fill = "lightblue") + facet_wrap(~variable)+theme_bw()
+
+
+
+
+#pairs plot
+waves2 <- data[,c(6:13,15)]
+pairs(waves2[,1:8], col = c("cornflowerblue", "orange")[as.factor(waves2$user.definedlabeln)])
+
+
+#mediation and attention
+ggplot(data, aes(x=Sample, y=Attention, colour=as.factor(SubjectID)))+ 
+  geom_line()+ facet_grid(~ user.definedlabeln)+theme_bw()+
+  scale_color_manual(values=c("blue4", "cyan4",
+                              "cornflowerblue",
+                              "powderblue", "darkorchid4",
+                              "plum3","maroon3",
+                              "darkorange2", "orange",
+                              "burlywood3"))+ ggtitle("Attention")
+
+
+ggplot(data, aes(x=Raw, y=Attention, colour=as.factor(SubjectID)))+ 
+  geom_line()+ facet_grid(~ user.definedlabeln)+theme_bw()+
+  scale_color_manual(values=c("blue4", "cyan4",
+                              "cornflowerblue",
+                              "powderblue", "darkorchid4",
+                              "plum3","maroon3",
+                              "darkorange2", "orange",
+                              "burlywood3"))+ ggtitle("Attention")
+
+
+ggplot(data, aes(x=Sample, y=Mediation, colour=as.factor(SubjectID)))+ 
+  geom_line()+ facet_grid(~ user.definedlabeln)+theme_bw()+
+  scale_color_manual(values=c("blue4", "cyan4",
+                              "cornflowerblue",
+                              "powderblue", "darkorchid4",
+                              "plum3","maroon3",
+                              "darkorange2", "orange",
+                              "burlywood3"))+ ggtitle("Mediation")
+
+
+ggplot(data, aes(x=Raw, y=Mediation, colour=as.factor(SubjectID)))+ 
+  geom_line()+ facet_grid(~ user.definedlabeln)+theme_bw()+
+  scale_color_manual(values=c("blue4", "cyan4",
+                              "cornflowerblue",
+                              "powderblue", "darkorchid4",
+                              "plum3","maroon3",
+                              "darkorange2", "orange",
+                              "burlywood3"))+ ggtitle("Mediation")
+
+
+```
+
+```{r}
+
+#Read in packages 
+library(ggridges)
+library(ggpubr)
+library(ROCR)
+library(kernlab)
+library(randomForest)
+library(caret)
+library(e1071)
+library(MASS)
+library(klaR)
+library(nnet)
+library(mda)
+library(rpart)
+library(rpart.plot)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(cvms)
+library(glmnet)
+library(gtsummary)
+
+#Prepare data
+data1 <- data[,c(3:13, 15)]
+names(data1)[names(data1) == 'user.definedlabeln'] <- 'ConLabel'
+
+#Testing and training data
+set.seed(2021)
+samps <- floor(0.8*nrow(data1))
+index <- sample(seq_len(nrow(data1)),size = samps)
+train <- data1[index,]
+train$ConLabel <-as.factor(train$ConLabel)
+test <- data1[-index,]
+test$ConLabel <-as.factor(test$ConLabel)
+
+```
+
+```{r}
+
+#Logistic Regression
+set.seed(2021)
+model <- glm(ConLabel ~.,family=binomial(link='logit'),data=train)
+
+#model$model
+#tab_model(model, show.est=T)
+summary(model)
+
+tbl_regression(model, exponentiate = TRUE)
+
+#Prediction
+set.seed(2021)
+fitted.results <- predict(model,newdata=subset(test[,1:11],type='response'))
+predictedvals <- ifelse(fitted.results > 0.5,1,0)
+
+#create confusion matrix
+misClasificError <- mean(predictedvals != test$ConLabel)
+print(paste('Accuracy',1-misClasificError))
+
+datafin1 <- data.frame(predictedvals, ConLabel= test$ConLabel)
+conmat1 <- table(datafin1)
+cfm1 <- as_tibble(conmat1)
+
+plot_confusion_matrix(cfm1, 
+                      target = "ConLabel", 
+                      prediction_col = "predictedvals",
+                      counts_col = "n")
+
+###
+
+#Reshape data to work with cv.glm
+set.seed(2021)
+X <- model.matrix(ConLabel ~0+., data = train)
+Y <- as.factor(train[,12])
+fit <- glmnet(X, Y, family= "binomial")
+plot(fit, xvar = "lambda")
+
+set.seed(2021)
+cvfit <- cv.glmnet(X, Y, alpha=1, family = "binomial")
+plot(cvfit)
+coef(cvfit, s = c("lambda.min"))
+
+set.seed(2021)
+lassmin <- glmnet(X, Y, alpha = 1, family = "binomial",
+                lambda = cvfit$lambda.min)
+
+lassmin
+
+lassmin
+#Step 5: create test
+set.seed(2021)
+x.test <- model.matrix(as.factor(ConLabel) ~.-1, test)
+
+set.seed(2021)
+probabilities2 <- lassmin %>% predict(x.test, type = "response")
+preds2 <- ifelse(probabilities2 > 0.5, 1, 0)
+
+confusionMatrix(data=as.factor(preds2), reference = as.factor(test$ConLabel))
+mean(preds2 == test$ConLabel)
+
+datafin <- data.frame(preds2, stat= test$ConLabel)
+conmat <- table(datafin)
+cfm <- as_tibble(conmat)
+
+plot_confusion_matrix(cfm, 
+                      target = "stat", 
+                      prediction_col = "s0",
+                      counts_col = "n")
+
+```
+
+```{r}
+#Regression Trees
+library(partykit)
+library(rpart)
+library(rattle)
+
+#fit model
+set.seed(2021)
+fit <- rpart(ConLabel~., data=train, method = "class",
+             control = rpart.control(cp = 0.0001))
+
+fit$numresp
+
+#predictions
+predictions1 <- predict(fit, test[,1:11], type = "class")
+
+misClasificError <- mean(predictions1 != test$ConLabel)
+print(paste('Accuracy',1-misClasificError))
+
+datafin1 <- data.frame(predictions1, ConLabel= test$ConLabel)
+conmat1 <- table(datafin1)
+cfm1 <- as_tibble(conmat1)
+
+plot_confusion_matrix(cfm1, 
+                      target = "ConLabel", 
+                      prediction_col = "predictions1",
+                      counts_col = "n")
+
+#prune
+set.seed(2021)
+tree1 <- train(ConLabel ~.,
+               data = train, 
+               method = "rpart",
+               preProcess = c("center", "scale"),
+               tuneGrid = data.frame(.cp = seq(0, 0.05, 0.001)),
+               trControl = trainControl(method = "cv", number = 10))
+
+tree1$bestTune
+
+
+set.seed(2021)
+
+#Fit
+treefit <- rpart(ConLabel ~., 
+                 data = train,
+                 control = rpart.control(cp = tree1$bestTune$cp))
+
+#plot
+fancyRpartPlot(treefit, cex =0.55)
+
+#0 is good
+rpart.plot(treefit, type = 0,cex = 0.55)
+
+
+#predictions
+pred1 <- predict(treefit, newdata = test, type = "class")
+
+#confusion matrix
+condata <- data.frame(pred1, stat= test$ConLabel)
+conmat <- table(condata)
+cfm <- as_tibble(conmat)
+
+plot_confusion_matrix(cfm, 
+                      target = "stat", 
+                      prediction_col = "pred1",
+                      counts_col = "n")
+
+#misclassification rate
+mean(pred1 == test$ConLabel)
+
+```
+
+
